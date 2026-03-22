@@ -9,21 +9,18 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
-// Tạo thư mục downloads nếu chưa có
 if (!fs.existsSync("./downloads")) {
   fs.mkdirSync("./downloads")
 }
 
-// ✅ Health check
 app.get("/", (req, res) => {
-  res.json({ status: "VidLoad Pro API running ✅" })
+  res.json({ status: "VidLoad Pro API running OK" })
 })
 
-// ✅ Scan kênh TikTok / YouTube / Facebook
 app.post("/scan-channel", (req, res) => {
   const { username, platform } = req.body
-  
   let url = ""
+
   if (platform === "tiktok") {
     url = `https://www.tiktok.com/@${username}`
   } else if (platform === "youtube") {
@@ -31,16 +28,19 @@ app.post("/scan-channel", (req, res) => {
   } else if (platform === "facebook" || platform === "fanpage") {
     url = `https://www.facebook.com/${username}/videos`
   } else {
-    return res.json({ success: false, message: "Platform không hợp lệ" })
+    return res.json({ success: false, message: "Platform khong hop le" })
   }
 
-  const cmd = `yt-dlp --flat-playlist -J --no-warnings "${url}"`
-  
-  exec(cmd, { timeout: 60000 }, (err, stdout) => {
+  // Thêm --user-agent và --no-check-certificate để bypass bot detection
+  const cmd = `yt-dlp --flat-playlist -J --no-warnings --no-check-certificates --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "${url}"`
+
+  exec(cmd, { timeout: 90000 }, (err, stdout, stderr) => {
     if (err) {
-      return res.json({ 
-        success: false, 
-        message: "Không thể scan kênh. Kiểm tra lại username." 
+      console.log("SCAN ERROR:", err.message)
+      console.log("STDERR:", stderr)
+      return res.json({
+        success: false,
+        message: "Khong the scan kenh: " + err.message
       })
     }
     try {
@@ -48,36 +48,31 @@ app.post("/scan-channel", (req, res) => {
       const videos = (data.entries || []).map(v => ({
         id: v.id,
         title: v.title || "Video",
-        duration: v.duration,
-        url: v.url || v.webpage_url
+        duration: v.duration || null,
+        url: v.url || v.webpage_url || ""
       }))
+      console.log("SCAN OK:", videos.length, "videos found")
       res.json({ success: true, videos, total: videos.length })
     } catch (e) {
-      res.json({ success: false, message: "Lỗi xử lý dữ liệu" })
+      console.log("PARSE ERROR:", e.message)
+      console.log("RAW OUTPUT:", stdout.substring(0, 500))
+      res.json({ success: false, message: "Loi xu ly du lieu" })
     }
   })
 })
 
-// ✅ Download 1 video
 app.post("/download-video", (req, res) => {
-  const { url, videoId } = req.body
-  const outputPath = `./downloads/%(title)s_${videoId}.%(ext)s`
-  const cmd = `yt-dlp -o "${outputPath}" --no-warnings "${url}"`
-  
-  exec(cmd, { timeout: 120000 }, (err) => {
+  const { url } = req.body
+  const cmd = `yt-dlp -o "./downloads/%(title)s.%(ext)s" --no-warnings --no-check-certificates "${url}"`
+
+  exec(cmd, { timeout: 180000 }, (err) => {
     if (err) {
-      return res.json({ success: false, message: "Tải thất bại" })
+      return res.json({ success: false, message: "Tai that bai" })
     }
-    res.json({ success: true, message: "Tải thành công" })
+    res.json({ success: true })
   })
 })
 
-// ✅ Kiểm tra trạng thái download
-app.get("/download-status/:sessionId", (req, res) => {
-  res.json({ status: "downloading", progress: 50 })
-})
-
-// ✅ Xuất ZIP
 app.get("/download-zip", (req, res) => {
   const archive = archiver("zip", { zlib: { level: 5 } })
   res.attachment("vidload-videos.zip")
@@ -86,7 +81,6 @@ app.get("/download-zip", (req, res) => {
   archive.finalize()
 })
 
-// ✅ Xóa downloads sau khi ZIP xong
 app.post("/cleanup", (req, res) => {
   fs.readdir("./downloads", (err, files) => {
     if (!err) {
@@ -100,5 +94,5 @@ app.post("/cleanup", (req, res) => {
 
 const PORT = process.env.PORT || 3000
 app.listen(PORT, () => {
-  console.log(`VidLoad Pro API running on port ${PORT}`)
+  console.log("VidLoad API running on port " + PORT)
 })
